@@ -6,6 +6,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from trailforge.domain.enums import RegistrationStatus
+from trailforge.domain.statistics import in_window
 from trailforge.models.activities import Expedition, ExpeditionRegistration
 from trailforge.repositories.base import BaseRepository, PageResult
 from trailforge.schemas.activities import ExpeditionFilter
@@ -52,10 +53,10 @@ class ExpeditionRepository(BaseRepository[Expedition]):
             statement = statement.where(Expedition.status == filters.status)
         if filters.risk_level is not None:
             statement = statement.where(Expedition.risk_level == filters.risk_level)
-        if filters.starts_after is not None:
-            statement = statement.where(Expedition.start_at >= filters.starts_after)
-        if filters.starts_before is not None:
-            statement = statement.where(Expedition.start_at <= filters.starts_before)
+        if filters.starts_after is not None or filters.starts_before is not None:
+            statement = statement.where(
+                *in_window(Expedition.start_at, filters.starts_after, filters.starts_before)
+            )
         if filters.search:
             pattern = f"%{filters.search.strip()}%"
             statement = statement.where(

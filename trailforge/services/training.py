@@ -12,6 +12,7 @@ from trailforge.domain.enums import (
     PlanStatus,
     SessionStatus,
 )
+from trailforge.domain.statistics import SESSION_PLANNED_EXCLUDED_STATUSES, percent
 from trailforge.errors import ConflictError, InvalidStateError, NotFoundError, ValidationError
 from trailforge.models.training import (
     TrainingExercise,
@@ -255,27 +256,37 @@ class TrainingService(ServiceBase):
         end_at: datetime | None = None,
     ) -> TrainingStatistics:
         self.users.require(user_id)
-        sessions = self.training.list_sessions(user_id=user_id, start_at=start_at, end_at=end_at)
-        records = self.training.records_for_user(user_id, start_at, end_at)
-        completed = sum(item.status == SessionStatus.COMPLETED for item in sessions)
-        skipped = sum(item.status == SessionStatus.SKIPPED for item in sessions)
-        loads_by_type: dict[str, float] = {}
-        for record, exercise in records:
-            key = str(exercise.training_type)
-            loads_by_type[key] = round(loads_by_type.get(key, 0) + record.training_load, 2)
-        rpes = [record.perceived_exertion for record, _ in records]
+        planned_counts = self.training.session_counts_by_planned_status(
+            user_id, start_at, end_at
+        )
+        planned_sessions = sum(
+            count
+            for status, count in planned_counts.items()
+            if status not in SESSION_PLANNED_EXCLUDED_STATUSES
+        )
+        skipped = planned_counts.get(SessionStatus.SKIPPED, 0)
+        completed = self.training.completed_session_count(user_id, start_at, end_at)
+        duration, distance, load, average_rpe = self.training.record_totals(
+            user_id, start_at, end_at
+        )
+        loads_by_type = {
+            training_type.value: round(load, 2)
+            for training_type, load in self.training.load_by_type(
+                user_id, start_at, end_at
+            ).items()
+        }
         return TrainingStatistics(
             user_id=user_id,
             period_start=start_at,
             period_end=end_at,
-            planned_sessions=len(sessions),
+            planned_sessions=planned_sessions,
             completed_sessions=completed,
             skipped_sessions=skipped,
-            completion_rate=round(completed / len(sessions) * 100, 2) if sessions else 0,
-            total_duration_minutes=sum(record.duration_minutes for record, _ in records),
-            total_distance_km=round(sum(record.distance_km for record, _ in records), 2),
-            total_training_load=round(sum(record.training_load for record, _ in records), 2),
-            average_rpe=round(sum(rpes) / len(rpes), 2) if rpes else 0,
+            completion_rate=percent(completed, planned_sessions),
+            total_duration_minutes=duration,
+            total_distance_km=round(distance, 2),
+            total_training_load=round(load, 2),
+            average_rpe=round(average_rpe, 2) if average_rpe is not None else 0,
             load_by_type=loads_by_type,
         )
 

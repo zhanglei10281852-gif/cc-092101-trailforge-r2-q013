@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, TypeVar
 
-from sqlalchemy import Engine, event
+from sqlalchemy import Engine, event, text
 from sqlalchemy import create_engine as sqlalchemy_create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -73,6 +73,12 @@ class Database:
     def session(self) -> Generator[Session, None, None]:
         session = self.session_factory()
         try:
+            # The pysqlite driver only opens a SQLite transaction lazily before
+            # DML, so read-only requests would otherwise run every SELECT in
+            # autocommit mode with its own snapshot. An explicit deferred BEGIN
+            # gives the whole request one consistent read snapshot without
+            # blocking writers (deferred transactions upgrade on first write).
+            session.execute(text("BEGIN"))
             yield session
             session.commit()
         except Exception:

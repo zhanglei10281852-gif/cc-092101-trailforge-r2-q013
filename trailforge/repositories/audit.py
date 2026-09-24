@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import Select, select
 
+from trailforge.domain.statistics import in_window
 from trailforge.models.audit import AuditLog, IdempotencyRecord
 from trailforge.repositories.base import BaseRepository, PageResult
 from trailforge.schemas.audit import AuditFilter
@@ -26,10 +27,12 @@ class AuditRepository(BaseRepository[AuditLog]):
             statement = statement.where(AuditLog.entity_id == filters.entity_id)
         if filters.action is not None:
             statement = statement.where(AuditLog.action == filters.action)
-        if filters.occurred_after is not None:
-            statement = statement.where(AuditLog.occurred_at >= filters.occurred_after)
-        if filters.occurred_before is not None:
-            statement = statement.where(AuditLog.occurred_at <= filters.occurred_before)
+        if filters.occurred_after is not None or filters.occurred_before is not None:
+            statement = statement.where(
+                *in_window(
+                    AuditLog.occurred_at, filters.occurred_after, filters.occurred_before
+                )
+            )
         if filters.correlation_id is not None:
             statement = statement.where(AuditLog.correlation_id == filters.correlation_id)
         return self.paginate(
